@@ -1,0 +1,57 @@
+#!/bin/sh
+# Compila "ClaudeBar.app" (con icona) nella cartella corrente. `./build.sh install` la copia anche in Applicazioni e la avvia.
+set -e
+cd "$(dirname "$0")"
+APP="ClaudeBar.app"
+# private.h dichiara le funzioni private della Touch Bar, DFRFoundation è la libreria di sistema che le contiene
+FLAGS="-import-objc-header private.h -F /System/Library/PrivateFrameworks -framework DFRFoundation"
+TMP=$(mktemp -d)
+
+swiftc main.swift $FLAGS -o "$TMP/selftest" && "$TMP/selftest" --selftest # build di debug: gli assert sono attivi
+
+rm -rf "$APP"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+# app universale (Apple Silicon + Intel) da macOS 13: gira su tutti i MacBook Pro con Touch Bar
+for arch in arm64 x86_64; do
+  swiftc -O -target $arch-apple-macos13 main.swift $FLAGS -o "$TMP/ClaudeBar-$arch"
+done
+lipo -create "$TMP/ClaudeBar-arm64" "$TMP/ClaudeBar-x86_64" -output "$APP/Contents/MacOS/ClaudeBar"
+
+# icona: l'app disegna un PNG 1024x1024, poi lo riduciamo a tutte le misure richieste da macOS
+mkdir "$TMP/AppIcon.iconset"
+"$APP/Contents/MacOS/ClaudeBar" --icon "$TMP/icon.png"
+for s in 16 32 128 256 512; do
+  sips -z $s $s "$TMP/icon.png" --out "$TMP/AppIcon.iconset/icon_${s}x${s}.png" >/dev/null
+  sips -z $((s * 2)) $((s * 2)) "$TMP/icon.png" --out "$TMP/AppIcon.iconset/icon_${s}x${s}@2x.png" >/dev/null
+done
+iconutil -c icns "$TMP/AppIcon.iconset" -o "$APP/Contents/Resources/AppIcon.icns"
+
+cat > "$APP/Contents/Info.plist" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>CFBundleName</key><string>ClaudeBar</string>
+  <key>CFBundleExecutable</key><string>ClaudeBar</string>
+  <key>CFBundleIdentifier</key><string>local.claudebar</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleShortVersionString</key><string>1.0</string>
+  <key>LSMinimumSystemVersion</key><string>13.0</string>
+  <key>LSUIElement</key><true/>
+  <key>NSHighResolutionCapable</key><true/>
+  <key>NSPrincipalClass</key><string>NSApplication</string>
+</dict></plist>
+EOF
+
+codesign --force --sign - "$APP" # firma locale: necessaria sui Mac Apple Silicon
+rm -rf "$TMP"
+
+if [ "$1" = "install" ]; then # l'avvio all'accesso punta a questa copia: deve stare in un posto fisso
+  pkill -x ClaudeBar || true
+  rm -rf "/Applications/$APP"
+  ditto "$APP" "/Applications/$APP"
+  open "/Applications/$APP"
+  echo "Installata e avviata: /Applications/$APP"
+else
+  echo "Fatto: open \"$APP\""
+fi
