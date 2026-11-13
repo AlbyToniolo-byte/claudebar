@@ -281,9 +281,10 @@ func renderIcon(to path: String) {
             : sessions.isEmpty ? .none : .done
         if look != tray.look { tray.look = look; tray.needsDisplay = true }
 
-        // una nuova richiesta di permesso apre la barra da sola; quando non ce ne sono più la richiude
+        // una nuova richiesta di permesso apre la barra da sola; quando non ce ne sono più la richiude,
+        // ma solo se l'ha aperta lei: se l'avevi aperta tu, torna alla lista
         let first = asks.first?.id
-        if let first, first != shownAsk { expand(); autoExpanded = true }
+        if let first, first != shownAsk { autoExpanded = autoExpanded || !bar.isVisible; expand() }
         if first == nil, autoExpanded { NSTouchBar.minimizeSystemModalTouchBar(bar); autoExpanded = false }
         shownAsk = first
 
